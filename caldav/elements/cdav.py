@@ -9,8 +9,14 @@ from .base import BaseElement, NamedBaseElement, ValuedBaseElement
 class CalendarQuery(BaseElement):
     tag = ns("C", "calendar-query")
 
+
+class CalendarMultiget(BaseElement):
+    tag = ns("C", "calendar-multiget")
+
+
 class FreeBusyQuery(BaseElement):
     tag = ns("C", "free-busy-query")
+
 
 class Mkcalendar(BaseElement):
     tag = ns("D", "mkcalendar")
@@ -127,6 +133,3 @@ class MaxInstances(ValuedBaseElement):
 
 class MaxAttendeesPerInstance(ValuedBaseElement):
     tag = ns("C", "max-attendees-per-instance")
-
-class SupportedCalendarComponentSet(BaseElement):
-    tag = ns("C", "supported-calendar-component-set")

@@ -2,7 +2,7 @@
 # -*- encoding: utf-8 -*-
 
 from lxml import etree
-from caldav.lib.namespace import nsmap
+from caldav.lib.namespace import nsmap, nsmap2
 from caldav.lib.python_utilities import isPython3, to_unicode
 
 
@@ -33,7 +33,7 @@ class BaseElement(object):
         return utf8
 
     def xmlelement(self):
-        root = etree.Element(self.tag, nsmap=nsmap)
+        root = etree.Element(self.tag, nsmap=nsmap2)
         if self.value is not None:
             root.text = self.value
         if len(self.attributes) > 0:

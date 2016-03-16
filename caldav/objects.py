@@ -28,8 +28,9 @@ class DAVObject(object):
     client = None
     parent = None
     name = None
+    etag = None
 
-    def __init__(self, client=None, url=None, parent=None, name=None, id=None, **extra):
+    def __init__(self, client=None, url=None, parent=None, name=None, id=None, etag=None, **extra):
         """
         Default constructor.
 
@@ -47,6 +48,7 @@ class DAVObject(object):
         self.parent = parent
         self.name = name
         self.id = id
+        self.etag = etag
         self.extra_init_options = extra
         ## url may be a path relative to the caldav root
         if client and url:
@@ -140,11 +142,18 @@ class DAVObject(object):
                 t = r.find(".//" + p.tag)
                 if len(list(t)) > 0:
                     if type is not None:
-                        val = t.find(".//" + type)
+                        val = t.findall(".//" + type)
                     else:
-                        val = t.find(".//*")
-                    if val is not None:
-                        val = getattr(val, what)
+                        val = t.findall(".//*")
+
+                    if len(val) > 0:
+                        if hasattr(p, 'convert'):
+                            val = p.convert(t)
+                        else:
+                            if len(val) == 1:
+                                val = getattr(val[0], what)
+                            else:
+                                val = getattr(t, what)
                     else:
                         val = None
                 else:
@@ -174,6 +183,8 @@ class DAVObject(object):
             rc = properties[path]
         elif exchange_path in list(properties.keys()):
             rc = properties[exchange_path]
+        elif len(properties.keys()) == 1:
+            rc = properties[properties.keys()[0]]
         else:
             raise Exception("The CalDAV server you are using has "
                             "a problem with path handling.")
@@ -476,7 +487,7 @@ class Calendar(DAVObject):
             data = cdav.CalendarData() + cdav.Expand(start, end)
         else:
             data = cdav.CalendarData()
-        prop = dav.Prop() + data
+        prop = dav.Prop() + data + dav.Getetag()
 
         range = cdav.TimeRange(start, end)
         vevent = cdav.CompFilter("VEVENT") + range
@@ -485,10 +496,11 @@ class Calendar(DAVObject):
 
         root = cdav.CalendarQuery() + [prop, filter]
         response = self._query(root, 1, 'report')
-        results = self._handle_prop_response(response=response, props=[cdav.CalendarData()])
+        results = self._handle_prop_response(response=response, props=[cdav.CalendarData(), dav.Getetag])
         for r in results:
             matches.append(
-                Event(self.client, url=self.url.join(r), data=results[r][cdav.CalendarData.tag], parent=self))
+                Event(self.client, url=self.url.join(r), data=results[r][cdav.CalendarData.tag], parent=self,
+                      etag=results[r][dav.Getetag.tag]))
         
         return matches
 
@@ -618,6 +630,55 @@ class Calendar(DAVObject):
     ## alias for backward compatibility
     event = event_by_uid
 
+    def events_etag(self):
+        """
+        List all events from the calendar with etag.
+
+        Returns:
+         * [Event(), ...]
+        """
+        all = []
+
+        prop = dav.Prop() + dav.Getetag()
+        vevent = cdav.CompFilter("VEVENT")
+        vcalendar = cdav.CompFilter("VCALENDAR") + vevent
+        filter = cdav.Filter() + vcalendar
+        root = cdav.CalendarQuery() + [prop, filter]
+
+        response = self._query(root, 1, query_method='report')
+        results = self._handle_prop_response(response, props=[dav.Getetag()])
+        for r in results:
+            all.append(Event(self.client, url=self.url.join(r), parent=self, etag=results[r][dav.Getetag.tag]))
+
+        return all
+
+    def events_list(self, uids):
+        """
+        List events from the calendar by the list of uids.
+
+        Returns:
+         * [Event(), ...]
+        """
+        all = []
+
+        data = cdav.CalendarData()
+        prop = dav.Prop() + data + dav.Getetag()
+        vevent = cdav.CompFilter("VEVENT")
+        vcalendar = cdav.CompFilter("VCALENDAR") + vevent
+        filter = cdav.Filter() + vcalendar
+        root = cdav.CalendarMultiget() + [prop, filter]
+
+        root += map(lambda x: dav.Href(value=x), uids)
+
+        response = self._query(root, 1, query_method='report')
+
+        results = self._handle_prop_response(response, props=[cdav.CalendarData(), dav.Getetag()])
+        for r in results:
+            all.append(Event(self.client, url=self.url.join(r), data=results[r][cdav.CalendarData.tag], parent=self,
+                             etag=results[r][dav.Getetag.tag]))
+
+        return all
+
     def events(self):
         """
         List all events from the calendar.
@@ -628,16 +689,17 @@ class Calendar(DAVObject):
         all = []
 
         data = cdav.CalendarData()
-        prop = dav.Prop() + data
+        prop = dav.Prop() + data + dav.Getetag()
         vevent = cdav.CompFilter("VEVENT")
         vcalendar = cdav.CompFilter("VCALENDAR") + vevent
         filter = cdav.Filter() + vcalendar
         root = cdav.CalendarQuery() + [prop, filter]
         
         response = self._query(root, 1, query_method='report')
-        results = self._handle_prop_response(response, props=[cdav.CalendarData()])
+        results = self._handle_prop_response(response, props=[cdav.CalendarData(), dav.Getetag()])
         for r in results:
-            all.append(Event(self.client, url=self.url.join(r), data=results[r][cdav.CalendarData.tag], parent=self))
+            all.append(Event(self.client, url=self.url.join(r), data=results[r][cdav.CalendarData.tag], parent=self,
+                             etag=results[r][dav.Getetag.tag]))
 
         return all
 
@@ -675,12 +737,12 @@ class CalendarObjectResource(DAVObject):
     _instance = None
     _data = None
 
-    def __init__(self, client=None, url=None, data=None, parent=None, id=None):
+    def __init__(self, client=None, url=None, data=None, parent=None, id=None, etag=None):
         """
         CalendarObjectResource has an additional parameter for its constructor:
          * data = "...", vCal data for the event
         """
-        DAVObject.__init__(self, client=client, url=url, parent=parent, id=id)
+        DAVObject.__init__(self, client=client, url=url, parent=parent, id=id, etag=etag)
         if data is not None:
             self.data = data
 
@@ -733,7 +795,7 @@ class CalendarObjectResource(DAVObject):
 
     def _set_data(self, data):
         self._data = vcal.fix(data)
-        self._instance = vobject.readOne(io.StringIO(to_unicode(self._data)))
+        self._instance = vobject.readOne(self._data)
         return self
 
     def _get_data(self):

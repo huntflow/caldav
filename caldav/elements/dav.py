@@ -56,6 +56,30 @@ class Response(BaseElement):
 class Status(BaseElement):
     tag = ns("D", "status")
 
+
+class Getetag(BaseElement):
+    tag = ns("D", "getetag")
+
+
 class CurrentUserPrincipal(BaseElement):
     tag = ns("D", "current-user-principal")
 
+
+class Owner(BaseElement):
+    tag = ns("D", "owner")
+
+
+class PrincipalURL(BaseElement):
+    tag = ns("D", "principal-URL")
+
+
+class CurrentUserPrivilegeSet(BaseElement):
+    tag = ns("D", "current-user-privilege-set")
+
+    @staticmethod
+    def convert(element):
+        result = []
+        for item in element.findall('a:privilege', namespaces={'a': 'DAV:'}):
+            result.append(item.find('./*').tag)
+
+        return result

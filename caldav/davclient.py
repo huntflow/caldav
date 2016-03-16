@@ -6,15 +6,16 @@ import logging
 from caldav.lib.python_utilities import isPython3, to_unicode, to_wire
 if isPython3():
     from urllib import parse
-    from urllib.parse import unquote
+    from urllib.parse import unquote, urlunsplit
 else:
-    from urlparse import unquote, urlparse as parse
+    from urlparse import unquote, urlparse as parse, urlunsplit
 import re
 from lxml import etree
 
 from caldav.lib import error
 from caldav.lib.url import URL
-from caldav.objects import Principal
+from caldav.objects import Principal, DAVObject
+from caldav.elements import dav
 
 log = logging.getLogger('caldav')
 
@@ -58,6 +59,8 @@ class DAVClient:
     proxy = None
     url = None
 
+    _last_response = None
+
     def __init__(self, url, proxy=None, username=None, password=None, auth=None, ssl_verify_cert=True):
         """
         Sets up a HTTPConnection object towards the server in the url.
@@ -87,7 +90,7 @@ class DAVClient:
             log.debug("init - proxy: %s" % (self.proxy))
 
         # Build global headers
-        self.headers = {"User-Agent": "Mozilla/5.0",
+        self.headers = {"User-Agent": "Mac+OS+X/10.11.2 (15C50) accountsd/113",
                         "Content-Type": "text/xml",
                         "Accept": "text/xml"}
         if self.url.username is not None:
@@ -100,6 +103,24 @@ class DAVClient:
         self.ssl_verify_cert = ssl_verify_cert
         self.url = self.url.unauth()
         log.debug("self.url: " + str(url))
+
+    def discover_principal(self):
+        """
+        Discovery method for finding principal with only host we have
+
+        :return: :class:`caldav.Principal`
+        """
+        well_known = DAVObject(self, url='/.well-known/caldav')
+        props = well_known.get_properties(props=[dav.CurrentUserPrincipal(), dav.ResourceType(),
+                                                 dav.PrincipalURL()])
+        parsed_url = parse(self.last_response.url)
+        # new url could be on another host (icloud)
+        url = urlunsplit((parsed_url.scheme, parsed_url.netloc, '/', parsed_url.query, ''))
+
+        new_client = DAVClient(url, username=getattr(self, 'username', None), password=getattr(self, 'password', None),
+                               auth=self.auth, ssl_verify_cert=self.ssl_verify_cert)
+        return Principal(new_client,
+                         url=props.get('{DAV:}current-user-principal') or props.get('{DAV:}principal-URL'))
 
     def principal(self):
         """
@@ -225,13 +246,29 @@ class DAVClient:
             auth = self.auth
 
         r = requests.request(method, url, data=to_wire(body), headers=combined_headers, proxies=proxies, auth=auth, verify=self.ssl_verify_cert)
+
         response = DAVResponse(r)
 
         ## If server supports BasicAuth and not DigestAuth, let's try again:
         if response.status == 401 and self.auth is None and auth is not None:
+            # if there were redirects, we need to continue with them
+            if r.history:
+                url = r.url
+
             auth = requests.auth.HTTPBasicAuth(self.username, self.password)
-            r = requests.request(method, url, data=to_wire(body), headers=combined_headers, proxies=proxies, auth=auth, verify=self.ssl_verify_cert)
+
+            r = requests.request(method, url, data=to_wire(body), headers=combined_headers, proxies=proxies, auth=auth,
+                                 verify=self.ssl_verify_cert)
+
             response = DAVResponse(r)
+
+            if r.history:
+                # requests do not redirect with body
+                r = requests.request(method, r.url, data=to_wire(body), headers=combined_headers, proxies=proxies,
+                                     auth=auth, verify=self.ssl_verify_cert)
+                response = DAVResponse(r)
+
+        self._last_response = r
 
         # this is an error condition the application wants to know
         if response.status == requests.codes.forbidden or \
@@ -248,3 +285,7 @@ class DAVClient:
             del self.password
 
         return response
+
+    @property
+    def last_response(self):
+        return self._last_response
