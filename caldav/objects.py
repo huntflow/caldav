@@ -140,6 +140,9 @@ class DAVObject(object):
             properties[href] = {}
             for p in props:
                 t = r.find(".//" + p.tag)
+                if t is None:
+                    continue
+
                 if len(list(t)) > 0:
                     if type is not None:
                         val = t.findall(".//" + type)
@@ -178,7 +181,6 @@ class DAVObject(object):
         properties = self._handle_prop_response(response, props)
         path = self.url.path
         exchange_path = self.url.path + '/'
-
         if path in list(properties.keys()):
             rc = properties[path]
         elif exchange_path in list(properties.keys()):
